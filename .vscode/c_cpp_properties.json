@@ -1,0 +1,48 @@
+{
+    "configurations": [
+        {
+            "name": "Mazda ARM",
+            "compilerPath": "${workspaceFolder}/mazda/m3-toolchain/bin/arm-cortexa9_neon-linux-gnueabi-g++",
+            "compilerArgs": [
+                "--sysroot=${workspaceFolder}/mazda/m3-toolchain/arm-cortexa9_neon-linux-gnueabi/sysroot",
+                "-march=armv7-a",
+                "-mtune=cortex-a9",
+                "-mfpu=neon"
+            ],
+            "cStandard": "c11",
+            "cppStandard": "c++11",
+            "intelliSenseMode": "linux-gcc-arm",
+            "includePath": [
+                "${workspaceFolder}/hu",
+                "${workspaceFolder}/common",
+                "${workspaceFolder}/hu/generated.arm",
+                "${workspaceFolder}/mazda/protobuf-2.6.1-arm/include",
+                "${workspaceFolder}/mazda/libunwind-1.2-rc1/include",
+                "${workspaceFolder}/mazda/m3-toolchain/arm-cortexa9_neon-linux-gnueabi/sysroot/usr/include",
+                "${workspaceFolder}/mazda/m3-toolchain/arm-cortexa9_neon-linux-gnueabi/sysroot/usr/include/gstreamer-0.10",
+                "${workspaceFolder}/mazda/m3-toolchain/arm-cortexa9_neon-linux-gnueabi/sysroot/usr/include/glib-2.0",
+                "${workspaceFolder}/mazda/m3-toolchain/arm-cortexa9_neon-linux-gnueabi/sysroot/usr/lib/glib-2.0/include",
+                "${workspaceFolder}/mazda/m3-toolchain/arm-cortexa9_neon-linux-gnueabi/sysroot/usr/include/libxml2",
+                "${workspaceFolder}/mazda/m3-toolchain/arm-cortexa9_neon-linux-gnueabi/sysroot/usr/include/dbus-1.0",
+                "${workspaceFolder}/mazda/m3-toolchain/arm-cortexa9_neon-linux-gnueabi/sysroot/usr/lib/dbus-1.0/include",
+                "${workspaceFolder}/mazda/m3-toolchain/arm-cortexa9_neon-linux-gnueabi/sysroot/usr/include/libusb-1.0",
+                "${workspaceFolder}/mazda/m3-toolchain/arm-cortexa9_neon-linux-gnueabi/sysroot/usr/include/dbus-c++-1",
+                "${workspaceFolder}/mazda/m3-toolchain/arm-cortexa9_neon-linux-gnueabi/sysroot/usr/include/alsa"
+            ],
+            "defines": [
+                "CMU=1",
+                "__STDC_FORMAT_MACROS",
+                "_GLIBCXX_USE_C99",
+                "DBUS_API_SUBJECT_TO_CHANGE"
+            ],
+            "browse": {
+                "path": [
+                    "${workspaceFolder}",
+                    "${workspaceFolder}/mazda/m3-toolchain/arm-cortexa9_neon-linux-gnueabi/sysroot/usr/include"
+                ],
+                "limitSymbolsToIncludedHeaders": true
+            }
+        }
+    ],
+    "version": 4
+}

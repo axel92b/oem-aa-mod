@@ -1,0 +1,60 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "Clean",
+            "group": "build",
+            "type": "shell",
+            "command": "make -C mazda clean",
+            "problemMatcher": []
+        },
+        {
+            "label": "Build Debug",
+            "group": "build",
+            "type": "shell",
+            "command": "make -j$(nproc) -C mazda debug",
+            "problemMatcher": "$gcc"
+        },
+        {
+            "label": "Build Release",
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            },
+            "type": "shell",
+            "command": "make -j$(nproc) -C mazda release",
+            "problemMatcher": "$gcc"
+        },
+        {
+            "label": "Rebuild Release",
+            "group": "build",
+            "type": "shell",
+            "command": "make -C mazda clean && make -j$(nproc) -C mazda release",
+            "problemMatcher": "$gcc"
+        },
+        {
+            "label": "Build blmjciaapa (Release)",
+            "group": "build",
+            "type": "shell",
+            "command": "make -j$(nproc) -C mazda blmjciaapa",
+            "problemMatcher": "$gcc"
+        },
+        {
+            "label": "Build blmjciaapa (Debug)",
+            "group": "build",
+            "type": "shell",
+            "command": "make -j$(nproc) -C mazda blmjciaapa-debug",
+            "problemMatcher": "$gcc"
+        },
+        {
+            "label": "Install",
+            "group": "build",
+            "dependsOn": [
+                "Build Debug"
+            ],
+            "type": "shell",
+            "command": "sudo mount -t drvfs f: /mnt/f && cp ./mazda/build/debug/libpatch-*.so /mnt/f/ && sudo umount /mnt/f",
+            "problemMatcher": []
+        }
+    ]
+}
