@@ -7,12 +7,60 @@
 #define LOG_TAG "HUD"
 #include "../log.h"
 #include "hud.h"
-#include "hud_send.h"
+
+// HUD transport selection. Two transports send our guidance to the
+// HUD by different routes:
+//   * vbs     (vbs_tx.{h,cpp})       — writes the HUD frame directly to
+//                                      com.jci.vbs.navi (libjcimod_navigation
+//                                      inside the jciVBS process). Works with
+//                                      no navigation SD card. This is the
+//                                      default.
+//   * svcnavi (svcnavi_tx.{h,cpp})   — emits GuidanceChangedForHUD to
+//                                      svcjcinavi, which forwards as the single
+//                                      HUD-frame writer. Needs the nav SD card.
+// Selected by the HUD_TRANSPORT macro (Makefile: HUD_TRANSPORT=vbs|svcnavi).
+// Defaults to vbs when unset.
+#define HUD_TRANSPORT_VBS     0
+#define HUD_TRANSPORT_SVCNAVI 1
+#ifndef HUD_TRANSPORT
+#define HUD_TRANSPORT HUD_TRANSPORT_VBS
+#endif
+
+#if HUD_TRANSPORT == HUD_TRANSPORT_SVCNAVI
+#include "svcnavi_tx.h"
+#else
+#include "vbs_tx.h"
+#endif
 
 #include <stdint.h>
 #include <string.h>
 
 namespace {
+
+// Transport forwarders — resolve to the selected backend (svcnavi or
+// vbs) at compile time so the call sites below stay transport-
+// agnostic. Both backends expose the same five-function interface.
+#if HUD_TRANSPORT == HUD_TRANSPORT_SVCNAVI
+inline void hud_tx_start()  { svcnavi_tx_start(); }
+inline void hud_tx_stop()   { svcnavi_tx_stop(); }
+inline void hud_tx_status(uint32_t status) { svcnavi_tx_status(status); }
+inline void hud_tx_next_turn(const char *road, uint32_t side, uint32_t event,
+                             int32_t angle, int32_t number)
+{ svcnavi_tx_next_turn(road, side, event, angle, number); }
+inline void hud_tx_distance(int32_t dist_m, int32_t time_s,
+                            int32_t disp_dist, uint32_t disp_unit)
+{ svcnavi_tx_distance(dist_m, time_s, disp_dist, disp_unit); }
+#else
+inline void hud_tx_start()  { vbs_tx_start(); }
+inline void hud_tx_stop()   { vbs_tx_stop(); }
+inline void hud_tx_status(uint32_t status) { vbs_tx_status(status); }
+inline void hud_tx_next_turn(const char *road, uint32_t side, uint32_t event,
+                             int32_t angle, int32_t number)
+{ vbs_tx_next_turn(road, side, event, angle, number); }
+inline void hud_tx_distance(int32_t dist_m, int32_t time_s,
+                            int32_t disp_dist, uint32_t disp_unit)
+{ vbs_tx_distance(dist_m, time_s, disp_dist, disp_unit); }
+#endif
 
 // cb_list shape: 19 word slots, total 76 bytes. The SDK memcpy's
 // all 76 bytes into the session handle at handle+0x20 inside
@@ -341,21 +389,21 @@ void our_nav_cb(void *user_ctx, void *hdr36)
     case kTagStatus: {
         const StatusHdr *s = static_cast<const StatusHdr *>(hdr36);
         dump_status(s);
-        hud_on_status(s->status);
+        hud_tx_status(s->status);
         break;
     }
     case kTagNextTurn: {
         const NextTurnHdr *t = static_cast<const NextTurnHdr *>(hdr36);
         const uint32_t turn_event = decode_turn_event(t->turn_event);
         dump_next_turn(t, turn_event);
-        hud_on_next_turn(t->road_name, t->turn_side, turn_event,
+        hud_tx_next_turn(t->road_name, t->turn_side, turn_event,
                          t->turn_angle, t->turn_number);
         break;
     }
     case kTagDistance: {
         const DistanceHdr *d = static_cast<const DistanceHdr *>(hdr36);
         dump_distance(d);
-        hud_on_distance(d->distance, d->time_until,
+        hud_tx_distance(d->distance, d->time_until,
                         d->display_distance, d->display_distance_unit);
         break;
     }
@@ -421,10 +469,10 @@ void hud_pre_aap_create_session(void *cb_list)
 
 void hud_post_aap_create_session(void)
 {
-    hud_send_start();
+    hud_tx_start();
 }
 
 void hud_pre_aap_destroy_session(void)
 {
-    hud_send_stop();
+    hud_tx_stop();
 }

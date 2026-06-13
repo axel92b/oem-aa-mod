@@ -23,6 +23,8 @@
 #ifndef LIBPATCH_BLMJCIAAPA_LIBJCIDBUS_H
 #define LIBPATCH_BLMJCIAAPA_LIBJCIDBUS_H
 
+#include <stdint.h>
+
 // JCIDBUS_conn_connect bus selector (decompiled libjcidbus:
 // 0 = SERVICE bus / $JCI_SERVICE_BUS, 1 = HMI bus / $JCI_HMI_BUS).
 constexpr int kJciServiceBus = 0;

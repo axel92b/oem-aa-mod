@@ -1,6 +1,6 @@
 // HUD hooks used by lifecycle.cpp around aap_create_session.
 // The per-event producer interface and sender lifecycle live in
-// hud_send.h.
+// the selected transport header (vbs_tx.h / svcnavi_tx.h).
 
 #ifndef LIBPATCH_BLMJCIAAPA_HUD_HUD_H
 #define LIBPATCH_BLMJCIAAPA_HUD_HUD_H

@@ -10,7 +10,7 @@
 // === What this file does =====================================
 //
 // On every 0x500 / 0x501 / 0x502 event the SDK delivers to hud.cpp,
-// hud.cpp calls one of the `hud_on_*` push functions in hud_send.h.
+// hud.cpp calls one of the `vbs_tx_*` push functions in vbs_tx.h.
 // Those run on the SDK protobuf-decode thread and MUST NOT block,
 // so all they do here is:
 //
@@ -38,7 +38,8 @@
 
 #define LOG_TAG "HUD"
 #include "../log.h"
-#include "hud_send.h"
+#include "vbs_tx.h"
+#include "hud_nav.h"
 #include "../oem/libjcivbsnaviclient.h"
 
 #include <chrono>
@@ -65,121 +66,9 @@ namespace {
 // oem/libjcivbsnaviclient.{h,cpp}.
 constexpr const char *kBusName = "com.jci.aapa.hud";
 
-// === Mazda HUD turn-icon enum =================================
-//
-// Mirrors `NaviTurns` in reference hud.h. These are the integer
-// codes the HUD ECU interprets — the OEM glyph atlas is baked
-// into the ECU firmware and is out of our scope. Same numbering
-// as the reference, no remapping.
-enum MazdaIcon : uint8_t {
-    HUD_STRAIGHT            = 1,
-    HUD_LEFT                = 2,
-    HUD_RIGHT               = 3,
-    HUD_SLIGHT_LEFT         = 4,
-    HUD_SLIGHT_RIGHT        = 5,
-    HUD_UNDER_BRIDGE        = 6,
-    HUD_OFF_RAMP_RIGHT      = 7,
-    HUD_DESTINATION         = 8,
-    HUD_SHARP_RIGHT         = 9,
-    HUD_U_TURN_RIGHT        = 10,
-    HUD_SHARP_LEFT          = 11,
-    HUD_FLAG                = 12,
-    HUD_U_TURN_LEFT         = 13,
-    HUD_FORK_RIGHT          = 14,
-    HUD_FORK_LEFT           = 15,
-    HUD_MERGE_LEFT          = 16,
-    HUD_MERGE_RIGHT         = 17,
-    HUD_EMPTY               = 18,
-    // 19 is empty
-    HUD_CROSS_RIGHT         = 20,
-    HUD_CROSS_LEFT          = 21,
-    HUD_MEDIAN_U_TURN_LEFT  = 22,
-    HUD_MEDIAN_U_TURN_RIGHT = 23,
-    HUD_CAR                 = 24,
-    HUD_NO_CAR              = 25,
-    // 26..29 are empty
-    HUD_OFF_RAMP_LEFT       = 30,
-    HUD_T_LEFT              = 31,
-    HUD_T_RIGHT             = 32,
-    HUD_DESTINATION_LEFT    = 33,
-    HUD_DESTINATION_RIGHT   = 34,
-    HUD_FLAG_LEFT           = 35,
-    HUD_FLAG_RIGHT          = 36,
-};
-
-// === Android turn_event → Mazda icon ==========================
-//
-// Lookup: kTurnIcons[android_turn_event][side_index]
-//   side_index: 0=LEFT, 1=RIGHT, 2=UNSPECIFIED/STRAIGHT
-//
-// Indexed by hu.proto NAVTurnMessage.TURN_EVENT (0..19, sparse at
-// 15 and 18). A `0` entry means "no glyph" — the HUD draws blank.
-// ROUNDABOUT_ENTER_AND_EXIT (13) is handled separately by
-// roundabout_icon() because the icon depends on exit angle.
-//
-// This table is copied verbatim from reference hud.cpp's turns[][]
-// (just renamed). The reference table has been validated on real
-// cars; do not "improve" it without a road test.
-constexpr uint8_t kTurnIcons[20][3] = {
-    /*  0 TURN_UNKNOWN                  */ {0, 0, 0},
-    /*  1 TURN_DEPART                   */ {HUD_FLAG_LEFT, HUD_FLAG_RIGHT, HUD_FLAG},
-    /*  2 TURN_NAME_CHANGE              */ {HUD_STRAIGHT, HUD_STRAIGHT, HUD_STRAIGHT},
-    /*  3 TURN_SLIGHT_TURN              */ {HUD_SLIGHT_LEFT, HUD_SLIGHT_RIGHT, HUD_STRAIGHT},
-    /*  4 TURN_TURN                     */ {HUD_LEFT, HUD_RIGHT, HUD_STRAIGHT},
-    /*  5 TURN_SHARP_TURN               */ {HUD_SHARP_LEFT, HUD_SHARP_RIGHT, HUD_STRAIGHT},
-    /*  6 TURN_U_TURN                   */ {HUD_U_TURN_LEFT, HUD_U_TURN_RIGHT, HUD_STRAIGHT},
-    /*  7 TURN_ON_RAMP                  */ {HUD_LEFT, HUD_RIGHT, HUD_STRAIGHT},
-    /*  8 TURN_OFF_RAMP                 */ {HUD_OFF_RAMP_LEFT, HUD_OFF_RAMP_RIGHT, HUD_STRAIGHT},
-    /*  9 TURN_FORK                     */ {HUD_FORK_LEFT, HUD_FORK_RIGHT, HUD_STRAIGHT},
-    /* 10 TURN_MERGE                    */ {HUD_MERGE_LEFT, HUD_MERGE_RIGHT, HUD_STRAIGHT},
-    /* 11 TURN_ROUNDABOUT_ENTER         */ {0, 0, 0},
-    /* 12 TURN_ROUNDABOUT_EXIT          */ {0, 0, 0},
-    /* 13 TURN_ROUNDABOUT_ENTER_AND_EXIT*/ {0, 0, 0},  // handled by roundabout_icon()
-    /* 14 TURN_STRAIGHT                 */ {HUD_STRAIGHT, HUD_STRAIGHT, HUD_STRAIGHT},
-    /* 15 unassigned in proto           */ {0, 0, 0},
-    /* 16 TURN_FERRY_BOAT               */ {0, 0, 0},
-    /* 17 TURN_FERRY_TRAIN              */ {0, 0, 0},
-    /* 18 unassigned in proto           */ {0, 0, 0},
-    /* 19 TURN_DESTINATION              */ {HUD_DESTINATION_LEFT, HUD_DESTINATION_RIGHT, HUD_DESTINATION},
-};
-
-// Roundabout exit icon — 12 directional roundabout glyphs per
-// side, indexed by exit angle (rounded to nearest 30°). Offsets
-// 37 (right-hand traffic) and 49 (left-hand traffic) come from
-// the reference implementation; the HUD ECU has roundabout
-// glyphs at IDs 37..48 and 49..60.
-uint8_t roundabout_icon(int32_t degrees, int32_t side_index_lr)
-{
-    uint8_t nearest = static_cast<uint8_t>((degrees + 15) / 30);
-    uint8_t offset  = (side_index_lr == 0) ? 49 : 37;
-    return static_cast<uint8_t>(nearest + offset);
-}
-
-// === Distance-unit enum translation ===========================
-//
-// hu.proto DISPLAY_DISTANCE_UNIT:
-//   1=METERS, 2=KILOMETERS10, 3=KILOMETERS, 4=MILES10,
-//   5=MILES,  6=FEET
-//
-// Mazda HUD (HudDistanceUnit in reference hud.h):
-//   1=METERS, 2=MILES, 3=KILOMETERS, 4=YARDS, 5=FEET
-//
-// The Mazda HUD doesn't distinguish the "rounded > 10" sub-units
-// — it always shows one decimal and lets the magnitude speak for
-// itself. So KILOMETERS10 and KILOMETERS both map to Mazda
-// KILOMETERS, etc.
-uint8_t map_distance_unit(uint32_t android_unit)
-{
-    switch (android_unit) {
-    case 1: return 1;  // METERS       -> METERS
-    case 2: return 3;  // KILOMETERS10 -> KILOMETERS
-    case 3: return 3;  // KILOMETERS   -> KILOMETERS
-    case 4: return 2;  // MILES10      -> MILES
-    case 5: return 2;  // MILES        -> MILES
-    case 6: return 5;  // FEET         -> FEET
-    default: return 0; // Unknown — HUD will render nothing.
-    }
-}
+// The HUD turn-icon enum, kTurnIcons table, roundabout_icon(),
+// map_distance_unit(), and compute_turn_icon() are shared with the
+// svcnavi transport — see hud_nav.h.
 
 // === Shared snapshot (seqlock-protected) ======================
 //
@@ -208,28 +97,6 @@ std::atomic<bool>      g_stop{false};     // stop requested: sender thread shoul
 // Shared sender-thread handle (both backends run the same loop).
 pthread_t g_sender_thread       = 0;
 bool      g_sender_thread_up    = false;
-
-// === Turn-icon resolution (backend-agnostic) ==================
-//
-// Pure function of the snapshot — both transports send the same
-// glyph id, so the mapping lives here rather than inside send_one.
-uint32_t compute_turn_icon(const NaviSnapshot &cur)
-{
-    if (cur.turn_event == 13 /*TURN_ROUNDABOUT_ENTER_AND_EXIT*/) {
-        // side_index: 0=left-hand traffic, 1=right-hand. Convert
-        // proto TURN_SIDE (1=L, 2=R, 3=U) to that binary —
-        // UNSPECIFIED falls back to right-hand, matching the
-        // reference's `side - 1`.
-        int32_t side_lr = (cur.turn_side == 1) ? 0 : 1;
-        return roundabout_icon(cur.turn_angle, side_lr);
-    }
-    if (cur.turn_event < 20) {
-        int32_t side_idx = static_cast<int32_t>(cur.turn_side) - 1;
-        if (side_idx < 0 || side_idx > 2) side_idx = 2;
-        return kTurnIcons[cur.turn_event][side_idx];
-    }
-    return 0;
-}
 
 // === OEM connection state =====================================
 //
@@ -296,7 +163,8 @@ void send_one(const NaviSnapshot &cur,
     // new resolved turn-icon both start a new instance.
     bool event_changed = (std::strncmp(cur.road_name, prev.road_name,
                                        sizeof(cur.road_name)) != 0) ||
-                         (compute_turn_icon(cur) != compute_turn_icon(prev));
+                         (compute_turn_icon(cur.turn_event, cur.turn_side, cur.turn_angle) !=
+                          compute_turn_icon(prev.turn_event, prev.turn_side, prev.turn_angle));
     bool distance_changed = event_changed ||
                             cur.distance_dec  != prev.distance_dec  ||
                             cur.distance_unit != prev.distance_unit ||
@@ -331,7 +199,7 @@ void send_one(const NaviSnapshot &cur,
     }
 
     if (distance_changed) {
-        uint32_t icon = compute_turn_icon(cur);
+        uint32_t icon = compute_turn_icon(cur.turn_event, cur.turn_side, cur.turn_angle);
 
 #ifdef DEBUG
         // Debug aid: when our mapping produced no glyph for this
@@ -539,13 +407,13 @@ void *sender_main(void *)
     return nullptr;
 }
 
-// Seqlock write helpers used by hud_on_* below.
+// Seqlock write helpers used by vbs_tx_* below.
 inline void seqlock_begin() { g_seq.fetch_add(1, std::memory_order_acq_rel); }
 inline void seqlock_end()   { g_seq.fetch_add(1, std::memory_order_acq_rel);
                               g_cv.notify_one(); }
 
 // Diagnostic: nav events arriving while the sender pipeline is not
-// live (g_active==false) are silently dropped by the hud_on_*
+// live (g_active==false) are silently dropped by the vbs_tx_*
 // producers below. The SDK callback fires at high rate, so rate-limit
 // the log: emit on the first drop and every 256th thereafter, carrying
 // the running total. A session that keeps accumulating drops but never
@@ -569,10 +437,10 @@ void note_inactive_drop(const char *which)
 
 // === Lifecycle (called from lifecycle.cpp PLT shims) ==========
 
-void hud_send_start(void)
+void vbs_tx_start(void)
 {
     if (g_sender_thread_up) {
-        LOGD("hud_send_start: already running");
+        LOGD("vbs_tx_start: already running");
         return;
     }
 
@@ -586,14 +454,14 @@ void hud_send_start(void)
 
     if (pthread_create(&g_sender_thread, nullptr,
                        sender_main, nullptr) != 0) {
-        LOGC("hud_send_start: failed to spawn sender thread");
+        LOGC("vbs_tx_start: failed to spawn sender thread");
         return;
     }
     g_sender_thread_up = true;
-    LOGD("hud_send_start: sender thread spawned (D-Bus setup deferred to thread)");
+    LOGD("vbs_tx_start: sender thread spawned (D-Bus setup deferred to thread)");
 }
 
-void hud_send_stop(void)
+void vbs_tx_stop(void)
 {
     if (!g_sender_thread_up) {
         return;  // not running
@@ -611,12 +479,12 @@ void hud_send_stop(void)
     g_sender_thread_up = false;
     g_sender_thread    = 0;
     g_active.store(false, std::memory_order_release);
-    LOGD("hud_send_stop: sender thread stopped, D-Bus clients released");
+    LOGD("vbs_tx_stop: sender thread stopped, D-Bus clients released");
 }
 
 // === Producer side (runs on the SDK callback thread) ==========
 
-void hud_on_status(uint32_t status)
+void vbs_tx_status(uint32_t status)
 {
     // No sender running (HUD not installed, or start failed) —
     // hud.cpp's dump_status() already logged the event's arrival;
@@ -640,7 +508,7 @@ void hud_on_status(uint32_t status)
     }
 }
 
-void hud_on_next_turn(const char *road_name,
+void vbs_tx_next_turn(const char *road_name,
                       uint32_t    turn_side,
                       uint32_t    turn_event,
                       int32_t     turn_angle,
@@ -666,7 +534,7 @@ void hud_on_next_turn(const char *road_name,
     seqlock_end();
 }
 
-void hud_on_distance(int32_t  /*distance_meters*/,
+void vbs_tx_distance(int32_t  /*distance_meters*/,
                      int32_t  time_until_seconds,
                      int32_t  display_distance,
                      uint32_t display_distance_unit)
