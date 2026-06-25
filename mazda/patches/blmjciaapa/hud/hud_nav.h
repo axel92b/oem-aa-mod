@@ -72,8 +72,10 @@ enum MazdaIcon : uint8_t {
 // 15 and 18). A `0` entry means "no glyph" — the HUD draws blank.
 // All three roundabout events — ROUNDABOUT_ENTER (11),
 // ROUNDABOUT_EXIT (12) and ROUNDABOUT_ENTER_AND_EXIT (13) — are
-// handled separately by roundabout_icon() because the icon depends
-// on the exit angle, so their table rows are never consulted.
+// resolved in compute_turn_icon(), not from this table (EXIT/
+// ENTER_AND_EXIT get a directional glyph from the exit angle;
+// ENTER gets a neutral "roundabout ahead" glyph), so their rows
+// are never consulted.
 //
 // This table is copied verbatim from reference hud.cpp's turns[][]
 // (just renamed). The reference table has been validated on real
@@ -157,25 +159,39 @@ inline uint8_t map_distance_unit(uint32_t android_unit)
 inline uint32_t compute_turn_icon(uint32_t turn_event, uint32_t turn_side,
                                   int32_t turn_angle)
 {
-    // All three roundabout events resolve to a directional roundabout
-    // glyph from the exit angle. Google Maps emits the combined
-    // ROUNDABOUT_ENTER_AND_EXIT (13), but Waze splits the maneuver into
-    // a separate ROUNDABOUT_ENTER (11) on approach and ROUNDABOUT_EXIT
-    // (12) at the exit; routing all three through roundabout_icon()
-    // keeps the HUD glyph populated for both apps instead of going
-    // blank on the enter/exit halves. When the exit angle is not yet
-    // known (e.g. some ROUNDABOUT_ENTER frames send 0), roundabout_icon()
-    // still yields a valid "straight-through" roundabout glyph, which is
-    // a better cue than an empty HUD.
-    if (turn_event == 11 /*TURN_ROUNDABOUT_ENTER*/ ||
-        turn_event == 12 /*TURN_ROUNDABOUT_EXIT*/ ||
+    // Roundabout events. turn_angle does NOT mean the same thing across
+    // the three, so they are NOT handled identically:
+    //
+    //   ROUNDABOUT_EXIT (12) and ROUNDABOUT_ENTER_AND_EXIT (13) carry the
+    //   *exit* angle — the bearing you leave the ring on — so they map to
+    //   the directional roundabout glyph via roundabout_icon().
+    //
+    //   ROUNDABOUT_ENTER (11) is the "approach the roundabout" cue. Its
+    //   angle is the *entry* heading (≈0, "go straight in"), not the exit
+    //   direction, so running it through roundabout_icon() would draw a
+    //   confidently-wrong "straight-through" arrow when the real exit is
+    //   to the side. Show a neutral "roundabout ahead" glyph instead —
+    //   the straight-through ring (angle 0) used purely as a generic
+    //   roundabout indicator, with the directional cue deferred to the
+    //   matching EXIT frame.
+    //
+    // Google Maps emits the combined event (13); Waze splits a roundabout
+    // into ENTER (11) on approach then EXIT (12) at the exit, so the EXIT
+    // frame is what restores the missing directional glyph for Waze.
+    //
+    // side_index: 0=left-hand traffic, 1=right-hand. Convert proto
+    // TURN_SIDE (1=L, 2=R, 3=U) to that binary — UNSPECIFIED falls back
+    // to right-hand, matching the reference's `side - 1`.
+    if (turn_event == 12 /*TURN_ROUNDABOUT_EXIT*/ ||
         turn_event == 13 /*TURN_ROUNDABOUT_ENTER_AND_EXIT*/) {
-        // side_index: 0=left-hand traffic, 1=right-hand. Convert
-        // proto TURN_SIDE (1=L, 2=R, 3=U) to that binary —
-        // UNSPECIFIED falls back to right-hand, matching the
-        // reference's `side - 1`.
         int32_t side_lr = (turn_side == 1) ? 0 : 1;
         return roundabout_icon(turn_angle, side_lr);
+    }
+    if (turn_event == 11 /*TURN_ROUNDABOUT_ENTER*/) {
+        int32_t side_lr = (turn_side == 1) ? 0 : 1;
+        // Generic "roundabout ahead" — neutral straight-through ring,
+        // not derived from the (entry-heading) angle.
+        return roundabout_icon(0, side_lr);
     }
     if (turn_event < 20) {
         int32_t side_idx = static_cast<int32_t>(turn_side) - 1;
