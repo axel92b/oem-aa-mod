@@ -139,4 +139,5 @@ jobs:
           fi
           gh release create "$TAG" dist/*.zip dist/SHA256SUMS \
             --title "$TAG" \
+            --prerelease \
             --generate-notes
