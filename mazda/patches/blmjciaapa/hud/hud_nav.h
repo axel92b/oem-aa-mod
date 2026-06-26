@@ -70,8 +70,10 @@ enum MazdaIcon : uint8_t {
 //
 // Indexed by hu.proto NAVTurnMessage.TURN_EVENT (0..19, sparse at
 // 15 and 18). A `0` entry means "no glyph" — the HUD draws blank.
-// ROUNDABOUT_ENTER_AND_EXIT (13) is handled separately by
-// roundabout_icon() because the icon depends on exit angle.
+// All three roundabout events — ROUNDABOUT_ENTER (11),
+// ROUNDABOUT_EXIT (12) and ROUNDABOUT_ENTER_AND_EXIT (13) — are
+// handled separately by roundabout_icon() because the icon depends
+// on the exit angle, so their rows below are left blank on purpose.
 //
 // This table is copied verbatim from reference hud.cpp's turns[][]
 // (just renamed). The reference table has been validated on real
@@ -88,8 +90,8 @@ constexpr uint8_t kTurnIcons[20][3] = {
     /*  8 TURN_OFF_RAMP                 */ {HUD_OFF_RAMP_LEFT, HUD_OFF_RAMP_RIGHT, HUD_STRAIGHT},
     /*  9 TURN_FORK                     */ {HUD_FORK_LEFT, HUD_FORK_RIGHT, HUD_STRAIGHT},
     /* 10 TURN_MERGE                    */ {HUD_MERGE_LEFT, HUD_MERGE_RIGHT, HUD_STRAIGHT},
-    /* 11 TURN_ROUNDABOUT_ENTER         */ {0, 0, 0},
-    /* 12 TURN_ROUNDABOUT_EXIT          */ {0, 0, 0},
+    /* 11 TURN_ROUNDABOUT_ENTER         */ {0, 0, 0},  // handled by roundabout_icon()
+    /* 12 TURN_ROUNDABOUT_EXIT          */ {0, 0, 0},  // handled by roundabout_icon()
     /* 13 TURN_ROUNDABOUT_ENTER_AND_EXIT*/ {0, 0, 0},  // handled by roundabout_icon()
     /* 14 TURN_STRAIGHT                 */ {HUD_STRAIGHT, HUD_STRAIGHT, HUD_STRAIGHT},
     /* 15 unassigned in proto           */ {0, 0, 0},
@@ -104,9 +106,26 @@ constexpr uint8_t kTurnIcons[20][3] = {
 // 37 (right-hand traffic) and 49 (left-hand traffic) come from
 // the reference implementation; the HUD ECU has roundabout
 // glyphs at IDs 37..48 and 49..60.
+//
+// `degrees` is the proto turn_angle, a SIGNED int32 with several
+// values the raw reference formula `(degrees+15)/30` mishandled:
+//   * Google Maps sends NEGATIVE angles for exits left of straight
+//     (e.g. -90 for a 90°-left exit). Truncating integer division of
+//     a negative numerator ran off the bottom of the 12-glyph block
+//     into unrelated (non-roundabout) glyph IDs — the reason left-hand
+//     exits rendered wrong.
+//   * The producer forwards -1 when the phone omits turn_angle.
+//   * An exit near 360° (or >360) overflowed past glyph 48 into the
+//     other traffic side's block.
+// Normalise into [0,360) and wrap the bucket mod 12 so the result is
+// always a valid 0..11 index, i.e. icon 37..48 / 49..60. A negative
+// angle maps to the same glyph as its positive co-terminal equivalent
+// (-90 ≡ 270), which is geometrically correct.
 inline uint8_t roundabout_icon(int32_t degrees, int32_t side_index_lr)
 {
-    uint8_t nearest = static_cast<uint8_t>((degrees + 15) / 30);
+    int32_t norm = degrees % 360;
+    if (norm < 0) norm += 360;
+    uint8_t nearest = static_cast<uint8_t>(((norm + 15) / 30) % 12);
     uint8_t offset  = (side_index_lr == 0) ? 49 : 37;
     return static_cast<uint8_t>(nearest + offset);
 }
@@ -145,10 +164,36 @@ inline uint8_t map_distance_unit(uint32_t android_unit)
 //   turn_event - proto TURN_EVENT (0..19 sparse)
 //   turn_side  - proto TURN_SIDE  (1=L, 2=R, 3=U)
 //   turn_angle - degrees (only used for roundabout exit angle)
+//
+// A return of 0 means "no glyph for this maneuver", but 0 is more than a
+// blank icon downstream — it doubles as "no active maneuver", and that
+// takes the DISTANCE/ETA down with it:
+//   * vbs/ECU: the maneuver code and the distance share ONE 12-byte HUD
+//     frame (VbsNaviHudDisplay); a 0 maneuver makes the HUD ECU discard
+//     the whole frame, so the distance disappears together with the icon.
+//   * svcjcinavi merge: a 0 maneuver on an AAP-sentinel frame is the
+//     explicit "AAP guidance stopped" signal (svcjcinavi/merge.cpp),
+//     which relinquishes the HUD back to OEM nav and drops the AAP
+//     distance and street too.
+// So any maneuver we actually want on the HUD MUST resolve to a non-zero
+// glyph. This is why the roundabout events route through roundabout_icon()
+// (which never returns 0, only 37..48 / 49..60) instead of their blank
+// kTurnIcons rows — a 0 here was exactly why roundabouts showed no
+// distance either.
 inline uint32_t compute_turn_icon(uint32_t turn_event, uint32_t turn_side,
                                   int32_t turn_angle)
 {
-    if (turn_event == 13 /*TURN_ROUNDABOUT_ENTER_AND_EXIT*/) {
+    // All three roundabout events resolve to a directional roundabout
+    // glyph chosen from the exit angle — the kTurnIcons rows for 11/12/13
+    // are intentionally blank. WHICH event the phone sends is app-
+    // specific: Google Maps favours the combined ENTER_AND_EXIT (13),
+    // while Waze (and Maps for some manoeuvres) splits it into a separate
+    // ROUNDABOUT_ENTER (11) / ROUNDABOUT_EXIT (12). They must all be
+    // routed here, otherwise the table's {0,0,0} rows draw a blank HUD —
+    // which is why roundabouts showed nothing at all under Waze.
+    if (turn_event == 11 /*TURN_ROUNDABOUT_ENTER*/ ||
+        turn_event == 12 /*TURN_ROUNDABOUT_EXIT*/ ||
+        turn_event == 13 /*TURN_ROUNDABOUT_ENTER_AND_EXIT*/) {
         // side_index: 0=left-hand traffic, 1=right-hand. Convert
         // proto TURN_SIDE (1=L, 2=R, 3=U) to that binary —
         // UNSPECIFIED falls back to right-hand, matching the
