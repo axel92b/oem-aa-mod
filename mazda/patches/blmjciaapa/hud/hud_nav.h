@@ -130,6 +130,40 @@ inline uint8_t roundabout_icon(int32_t degrees, int32_t side_index_lr)
     return static_cast<uint8_t>(nearest + offset);
 }
 
+// Approximate a roundabout exit bearing from the 1-based exit number,
+// for phones that don't send a usable turn_angle. Verified on-device:
+// some nav apps always send turn_angle=0 on roundabouts and put the
+// guidance in turn_number instead — a logged Israeli (right-hand-traffic)
+// route showed every roundabout as turn_event=13, turn_angle=0,
+// turn_number=3. Without this, all roundabouts collapsed to bucket 0 (the
+// "U-turn around the island" glyph) and looked identical.
+//
+// The first three exits map to the intuitive bearings (the exit angle is
+// measured the same way the proto turn_angle is — ~180° = straight
+// through, 0/360° = back/U-turn):
+//   exit 1 ->  90°  (first exit — a right-ish turn in RH traffic)
+//   exit 2 -> 180°  (straight through — the most common action)
+//   exit 3 -> 270°  (a left-ish turn)
+// The 4th exit and beyond map to 360° == bucket 0, the roundabout U-turn
+// glyph ("go all the way around the island"), instead of continuing with
+// exit*90. A plain exit*90 would, for exit 5+, wrap (450°->90°) and alias
+// a late exit onto the 1st-exit glyph. We can't know the real angle of a
+// 5th/6th exit without the total exit count — which this protocol does not
+// carry (see NAVTurnMessage: only turn_number, no total) — so every late
+// exit shows the single "around the roundabout" glyph; the distance
+// countdown tells the driver when to leave. Returning a constant also
+// bounds the result so a garbage exit number can't overflow int32.
+// roundabout_icon() does the left/right-hand mirror via its offset, so
+// this stays handedness-agnostic. It's a coarse hint anyway — the HUD has
+// only 30° glyph resolution — used solely when no real angle is available.
+inline int32_t roundabout_exit_angle(int32_t exit_number)
+{
+    if (exit_number <= 1) return 90;   // 1st exit (right-ish); floor for <1
+    if (exit_number == 2) return 180;  // straight through
+    if (exit_number == 3) return 270;  // left-ish
+    return 360;                        // 4th and beyond: roundabout U-turn (bucket 0)
+}
+
 // === Distance-unit enum translation ===========================
 //
 // hu.proto DISPLAY_DISTANCE_UNIT:
@@ -164,6 +198,8 @@ inline uint8_t map_distance_unit(uint32_t android_unit)
 //   turn_event - proto TURN_EVENT (0..19 sparse)
 //   turn_side  - proto TURN_SIDE  (1=L, 2=R, 3=U)
 //   turn_angle - degrees (only used for roundabout exit angle)
+//   turn_number- maneuver / roundabout exit number (used for the
+//                roundabout glyph when no real angle is sent)
 //
 // A return of 0 means "no glyph for this maneuver", but 0 is more than a
 // blank icon downstream — it doubles as "no active maneuver", and that
@@ -181,16 +217,16 @@ inline uint8_t map_distance_unit(uint32_t android_unit)
 // kTurnIcons rows — a 0 here was exactly why roundabouts showed no
 // distance either.
 inline uint32_t compute_turn_icon(uint32_t turn_event, uint32_t turn_side,
-                                  int32_t turn_angle)
+                                  int32_t turn_angle, int32_t turn_number)
 {
     // All three roundabout events resolve to a directional roundabout
-    // glyph chosen from the exit angle — the kTurnIcons rows for 11/12/13
-    // are intentionally blank. WHICH event the phone sends is app-
-    // specific: Google Maps favours the combined ENTER_AND_EXIT (13),
-    // while Waze (and Maps for some manoeuvres) splits it into a separate
-    // ROUNDABOUT_ENTER (11) / ROUNDABOUT_EXIT (12). They must all be
-    // routed here, otherwise the table's {0,0,0} rows draw a blank HUD —
-    // which is why roundabouts showed nothing at all under Waze.
+    // glyph — the kTurnIcons rows for 11/12/13 are intentionally blank.
+    // WHICH event the phone sends is app-specific: Google Maps favours the
+    // combined ENTER_AND_EXIT (13), while Waze (and Maps for some
+    // manoeuvres) splits it into a separate ROUNDABOUT_ENTER (11) /
+    // ROUNDABOUT_EXIT (12). They must all be routed here, otherwise the
+    // table's {0,0,0} rows draw a blank HUD — which is why roundabouts
+    // showed nothing at all under Waze.
     if (turn_event == 11 /*TURN_ROUNDABOUT_ENTER*/ ||
         turn_event == 12 /*TURN_ROUNDABOUT_EXIT*/ ||
         turn_event == 13 /*TURN_ROUNDABOUT_ENTER_AND_EXIT*/) {
@@ -199,7 +235,26 @@ inline uint32_t compute_turn_icon(uint32_t turn_event, uint32_t turn_side,
         // UNSPECIFIED falls back to right-hand, matching the
         // reference's `side - 1`.
         int32_t side_lr = (turn_side == 1) ? 0 : 1;
-        return roundabout_icon(turn_angle, side_lr);
+
+        // Prefer a real exit bearing when the phone actually sends one.
+        // Treat 0 AND the -1 "absent" sentinel as "no angle": verified
+        // on-device, some apps always send turn_angle=0 on roundabouts
+        // (conveying the exit via turn_number instead), and the producer
+        // forwards -1 when the field is omitted — both must fall through
+        // to the exit-number heuristic rather than resolve to the
+        // misleading bucket-0 U-turn glyph. Google Maps' genuine signed
+        // bearings (e.g. -90 for a left exit) are non-zero/non-(-1) and
+        // are still used directly.
+        if (turn_angle != 0 && turn_angle != -1) {
+            return roundabout_icon(turn_angle, side_lr);
+        }
+        // No usable angle: derive the glyph from the exit number when we
+        // have one (1-based), else fall back to the neutral
+        // straight-through glyph (~180°) rather than the U-turn one.
+        if (turn_number >= 1) {
+            return roundabout_icon(roundabout_exit_angle(turn_number), side_lr);
+        }
+        return roundabout_icon(180, side_lr);
     }
     if (turn_event < 20) {
         int32_t side_idx = static_cast<int32_t>(turn_side) - 1;

@@ -163,8 +163,8 @@ void send_one(const NaviSnapshot &cur,
     // new resolved turn-icon both start a new instance.
     bool event_changed = (std::strncmp(cur.road_name, prev.road_name,
                                        sizeof(cur.road_name)) != 0) ||
-                         (compute_turn_icon(cur.turn_event, cur.turn_side, cur.turn_angle) !=
-                          compute_turn_icon(prev.turn_event, prev.turn_side, prev.turn_angle));
+                         (compute_turn_icon(cur.turn_event, cur.turn_side, cur.turn_angle, cur.turn_number) !=
+                          compute_turn_icon(prev.turn_event, prev.turn_side, prev.turn_angle, prev.turn_number));
     bool distance_changed = event_changed ||
                             cur.distance_dec  != prev.distance_dec  ||
                             cur.distance_unit != prev.distance_unit ||
@@ -199,7 +199,7 @@ void send_one(const NaviSnapshot &cur,
     }
 
     if (distance_changed) {
-        uint32_t icon = compute_turn_icon(cur.turn_event, cur.turn_side, cur.turn_angle);
+        uint32_t icon = compute_turn_icon(cur.turn_event, cur.turn_side, cur.turn_angle, cur.turn_number);
 
 #ifdef DEBUG
         // Debug aid: when our mapping produced no glyph for this

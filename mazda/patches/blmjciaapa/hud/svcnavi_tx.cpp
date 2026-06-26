@@ -152,7 +152,7 @@ void emit_guidance(uint32_t dir_icon, int32_t maneuver_dist,
 // frame was dropped.
 void send_one(const NaviSnapshot &cur)
 {
-    uint32_t icon = compute_turn_icon(cur.turn_event, cur.turn_side, cur.turn_angle);
+    uint32_t icon = compute_turn_icon(cur.turn_event, cur.turn_side, cur.turn_angle, cur.turn_number);
 
     emit_guidance(icon,
                   cur.distance_dec,
