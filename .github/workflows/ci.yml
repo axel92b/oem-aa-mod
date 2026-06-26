@@ -81,6 +81,21 @@ jobs:
       - name: Build (release + debug)
         run: make -C mazda -j"$(nproc)" all
 
+      - name: Build CI-able on-device test tools
+        run: |
+          set -euo pipefail
+          # gsi_test (plain C) and maneuver_test (raw libdbus-1) are
+          # self-contained and build from a clean checkout. lane_test is
+          # intentionally skipped: it needs the un-committed, local-only
+          # reference/dbus/generated_cmu.h (dbus-c++ proxies), so it cannot
+          # build in CI.
+          make -C test -j"$(nproc)" gsi_test maneuver_test
+          for b in test/build/gsi_test test/build/maneuver_test; do
+            file "$b"
+            file "$b" | grep -q 'ELF 32-bit.*ARM' || {
+              echo "::error::$b is not an ARM binary"; exit 1; }
+          done
+
       - name: Package release + debug archives
         run: |
           set -euo pipefail
@@ -122,5 +137,15 @@ jobs:
           path: |
             dist/*.zip
             dist/SHA256SUMS
+          retention-days: 14
+          if-no-files-found: error
+
+      - name: Upload on-device test tools
+        uses: actions/upload-artifact@v4
+        with:
+          name: oem-aa-mod-test-tools
+          path: |
+            test/build/gsi_test
+            test/build/maneuver_test
           retention-days: 14
           if-no-files-found: error

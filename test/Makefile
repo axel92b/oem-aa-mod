@@ -51,8 +51,19 @@ DBUSXX_LDFLAGS := --sysroot=$(SYSROOT) -static-libstdc++ \
                  -Wl,-Bstatic -ldbus-c++-1 -Wl,-Bdynamic \
                  -ldbus-1 -lpthread -lrt
 
+# --- raw-libdbus tools (maneuver_test) -------------------------
+# maneuver_test talks to com.jci.vbs.navi with plain libdbus-1 (no
+# dbus-c++ / generated_cmu.h), so it builds from a clean checkout / in CI
+# with no local-only assets. It reuses CXXFLAGS for the dbus-1.0 include
+# dirs (the extra dbus-c++-1 / reference includes there are harmless) and
+# links only libdbus-1 (dynamic; present on the unit and in the sysroot).
+# -static-libstdc++ for the C++ runtime, same rationale as the dbus-c++
+# tools.
+DBUS1_LDFLAGS := --sysroot=$(SYSROOT) -static-libstdc++ \
+                 -ldbus-1 -lpthread -lrt
+
 BUILD := build
-TOOLS := gsi_test lane_test
+TOOLS := gsi_test lane_test maneuver_test
 BINS  := $(addprefix $(BUILD)/,$(TOOLS))
 
 .PHONY: all clean $(TOOLS)
@@ -62,9 +73,14 @@ all: $(BINS)
 $(BUILD)/%: %.c | $(BUILD)
 	$(CC) $(CFLAGS) $< -o $@ $(LDFLAGS)
 
-# lane_test is C++ (dbus-c++). Explicit rule overrides the .c pattern.
+# lane_test is C++ over dbus-c++ (needs the local-only generated_cmu.h).
+# maneuver_test is C++ over raw libdbus-1 (self-contained). Explicit rules
+# override the .c pattern.
 $(BUILD)/lane_test: lane_test.cpp | $(BUILD)
 	$(CXX) $(CXXFLAGS) $< -o $@ $(DBUSXX_LDFLAGS)
+
+$(BUILD)/maneuver_test: maneuver_test.cpp | $(BUILD)
+	$(CXX) $(CXXFLAGS) $< -o $@ $(DBUS1_LDFLAGS)
 
 # Convenience: `make gsi_test` builds build/gsi_test.
 $(TOOLS): %: $(BUILD)/%
