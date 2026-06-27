@@ -23,10 +23,10 @@
 // See config.{h,cpp}.
 #include "svcnavi_tx.h"
 #include "vbs_tx.h"
-#include "translit.h"   // hud_translit::fold() — precomposed-Latin street-name fold
 
 #include <stdint.h>
 #include <string.h>
+#include <stdio.h>
 
 namespace {
 
@@ -70,22 +70,35 @@ inline void hud_tx_status(uint32_t status) { g_tx->status(status); }
 inline void hud_tx_next_turn(const char *road, uint32_t side, uint32_t event,
                              int32_t angle, int32_t number)
 {
-    // Fold HUD-unrenderable precomposed Latin letters (Latin Extended
-    // Additional, U+1E00..U+1EFF) down to their base forms so accented
-    // street names show legibly instead of gapping (gated by
-    // hud_fold_latin, default on). Copy the SDK-owned (const) road name
-    // into a local buffer first, then fold in place — the fold only ever
-    // shrinks, so 256 bounds it (the transports truncate to their own
-    // buffer anyway).
-    if (road != nullptr && libpatch_config::hud_fold_latin()) {
-        char buf[256];
-        strncpy(buf, road, sizeof(buf) - 1);
-        buf[sizeof(buf) - 1] = '\0';
-        hud_translit::fold(buf);
-        g_tx->next_turn(buf, side, event, angle, number);
+    (void)road;  // road / street names are intentionally suppressed (below)
+
+    // The HUD secondary line carries ONLY the roundabout exit cue. For the
+    // roundabout events (ROUNDABOUT_ENTER 11, ROUNDABOUT_EXIT 12,
+    // ROUNDABOUT_ENTER_AND_EXIT 13) the directional glyph alone doesn't say
+    // WHICH exit to take — the phone carries that in turn_number (Maps/Waze
+    // put the roundabout exit there) — so spell out "Exit at N" there.
+    // Gated on number >= 1 so a 0/absent exit number (e.g. a distant
+    // ROUNDABOUT_ENTER pre-announcement) falls through to the blank case.
+    // (On EU svcnavi the market blanks the outbound street strip, so this
+    // cue needs force_street_name=true to surface; it shows directly on
+    // the vbs transport and on non-blanking (NA) svcnavi.)
+    if ((event == 11 || event == 12 || event == 13) && number >= 1) {
+        char exit_buf[32];
+        snprintf(exit_buf, sizeof(exit_buf), "Exit at %d",
+                 static_cast<int>(number));
+        g_tx->next_turn(exit_buf, side, event, angle, number);
         return;
     }
-    g_tx->next_turn(road, side, event, angle, number);
+
+    // Every other maneuver: blank the strip. Road / street names are
+    // deliberately NOT shown — only the roundabout exit cue above is. The
+    // empty string both suppresses the name now and WIPES a prior
+    // "Exit at N" once the roundabout is passed: the transports re-latch
+    // the strip on the changed string (vbs_tx) / re-send every frame
+    // (svcnavi), and a nav STOP zeroes the snapshot. The blank is honoured
+    // on every transport and market — even svcnavi force_street_name only
+    // reads the street back from the (now empty) current_StreetName.
+    g_tx->next_turn("", side, event, angle, number);
 }
 inline void hud_tx_distance(int32_t dist_m, int32_t time_s,
                             int32_t disp_dist, uint32_t disp_unit)

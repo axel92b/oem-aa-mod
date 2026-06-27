@@ -168,8 +168,7 @@ case-insensitive.
 | `touch` | `true` / `false` | `true` | Enable the Android Auto touch-input passthrough. |
 | `hud` | `true` / `false` | `true` | Enable HUD guidance forwarding (turn arrow + distance to the head-up display). |
 | `hud_transport` | `svcnavi` / `vbs` | `svcnavi` | Which path HUD guidance takes (only relevant when `hud = true`). |
-| `force_street_name` | `true` / `false` | `false` | Force the Android Auto street name onto the HUD street line even where the OEM blanks it (see the EU note below). |
-| `hud_fold_latin` | `true` / `false` | `true` | Fold HUD-unrenderable precomposed Latin letters in street names to their base forms (see the note below). |
+| `force_street_name` | `true` / `false` | `false` | Re-assert the roundabout `Exit at N` cue onto the HUD street line even where the OEM blanks it (EU). No other street names are shown — see the note below. |
 
 Booleans are lenient — `true`/`1`/`yes`/`on` and `false`/`0`/`no`/`off`
 are all accepted.
@@ -186,37 +185,27 @@ are all accepted.
   with no navigation SD card, but it is one of two writers, so it can
   conflict with OEM nav guidance.
 
-- **`force_street_name`** controls whether the Android Auto street name is
-shown on the HUD's secondary line:
+- The mod does **not** display street names on the HUD. The HUD's
+  secondary (street) line carries only the **roundabout exit cue** —
+  `Exit at N` — when Android Auto reports a roundabout maneuver; for every
+  other maneuver the line is left blank.
 
-  - On **NA** firmware the street name already appears with the defaults,
-    so this option can be left `false`.
+- **`force_street_name`** controls whether that `Exit at N` cue survives
+  on firmware that blanks the HUD street line:
+
+  - On **NA** firmware the line is not blanked, so the cue shows with the
+    defaults and this option can be left `false`.
   - On **EU** firmware the OEM navigation service blanks the HUD street
     line for the head-up display types used in that market — the turn
-    arrow and distance still show, but the street stays empty. Set
-    **`force_street_name = true`** to make the merge shim re-assert the
-    real Android Auto street onto that line. This is the specific setting needed for street-name display on EU units; it has no effect on the maneuver arrow or distance.
+    arrow and distance still show, but the line stays empty, which would
+    hide the `Exit at N` cue. Set **`force_street_name = true`** to make
+    the merge shim re-assert the cue onto that line. It has no effect on
+    the maneuver arrow or distance.
 
 The option only applies with `hud_transport = svcnavi` (the
 `libpatch-svcjcinavi.so` merge shim must be installed and patched into
 `jcinavi`, as in step 2). It is harmless on firmware that does not blank
 the street, so it is safe to enable everywhere if preferred.
-
-- **`hud_fold_latin`** handles a HUD-font limitation: the head-up display's
-  ECU font only has glyphs for Unicode below roughly U+0800, so any
-  3-byte-UTF-8 character renders as a blank space. For **precomposed
-  Latin letters** — the Latin Extended Additional block (`U+1E00`–`U+1EFF`),
-  where each character is a base letter plus diacritics — we can fold to
-  the renderable base instead of losing them. With this enabled (the
-  default) each such letter is folded to its base, keeping a renderable
-  accent where the letter is defined by one (`ă â ê ô ơ ư`) and dropping
-  only the marks the font can't draw: `ễ`→`ê`, `ớ`→`ơ`, `ậ`→`â`,
-  `ḍ`→`d`, `ṛ`→`r`, `ẁ`→`w`. So a name the font shows as `Nguy n Phư c`
-  reads `Nguyên Phươc`. It affects only the HUD street strip; all other
-  text — ASCII, the already-renderable `ă â ê ô ơ ư đ`, and non-Latin
-  ≥U+0800 scripts (CJK, Thai, …, which have no Latin base and stay blank)
-  — is passed through unchanged, so it is harmless everywhere. Set
-  `false` to send names verbatim. Applies to both HUD transports.
 
 After editing `libpatch.conf`, restart the affected service(s) —
 `jciAAPA`, and `jcinavi` if you patched it — or reboot for the change to
